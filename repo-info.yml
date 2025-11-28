@@ -3,9 +3,9 @@ repository:
   name: workflow-test
   default_branch: main
 release:
-  base_branch: release/v0.4.12
-  head_branch: dev/v0.4.12
-  version: v0.4.12
+  base_branch: release/v0.4.11
+  head_branch: dev/v0.4.11
+  version: v0.4.11
 pull_request:
   number: 35
   title: 'chore: update changes number to 14'

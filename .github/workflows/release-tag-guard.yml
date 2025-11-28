@@ -13,53 +13,56 @@ jobs:
       contents: read
       pull-requests: write
     env:
-      TAG_EXISTS: 'false'
+      RELEASE_GUARD_SHOULD_RUN: 'false'
+      RELEASE_GUARD_VERSION: ''
+      RELEASE_GUARD_PR_NUMBER: ''
+      RELEASE_GUARD_TAG_EXISTS: 'false'
 
     steps:
       - name: Gather release metadata
-        id: release_info
         shell: bash
         run: |
           set -euo pipefail
-          echo "TAG_EXISTS=false" >> "$GITHUB_ENV"
-          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          echo "RELEASE_GUARD_SHOULD_RUN=false" >> "$GITHUB_ENV"
+          echo "RELEASE_GUARD_VERSION=" >> "$GITHUB_ENV"
+          echo "RELEASE_GUARD_PR_NUMBER=" >> "$GITHUB_ENV"
+          echo "RELEASE_GUARD_TAG_EXISTS=false" >> "$GITHUB_ENV"
+
           PR_STATE="${{ github.event.pull_request.state }}"
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
 
           if [[ "$PR_STATE" == "closed" ]]; then
-            echo "is_release_target=false" >> "$GITHUB_OUTPUT"
             echo "Pull request already closed; skipping validation." >&2
             exit 0
           fi
 
           if [[ "$BASE_BRANCH" =~ ^release/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             VERSION="${BASH_REMATCH[1]}"
-            echo "is_release_target=true" >> "$GITHUB_OUTPUT"
-            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "RELEASE_GUARD_SHOULD_RUN=true" >> "$GITHUB_ENV"
+            echo "RELEASE_GUARD_VERSION=$VERSION" >> "$GITHUB_ENV"
+            echo "RELEASE_GUARD_PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
             echo "Detected release target branch $BASE_BRANCH with version $VERSION."
           else
-            echo "is_release_target=false" >> "$GITHUB_OUTPUT"
             echo "Base branch $BASE_BRANCH does not match release pattern; skipping validation." >&2
           fi
 
       - name: Check if release tag exists
-        id: tag_check
-        if: steps.release_info.outputs.is_release_target == 'true'
+        if: ${{ env.RELEASE_GUARD_SHOULD_RUN == 'true' }}
         uses: actions/github-script@v7
         with:
           script: |
-            const version = '${{ steps.release_info.outputs.version }}';
+            const version = process.env.RELEASE_GUARD_VERSION;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
             try {
               await github.rest.git.getRef({ owner, repo, ref: `tags/${version}` });
-              core.setOutput('exists', 'true');
-              core.exportVariable('TAG_EXISTS', 'true');
+              core.exportVariable('RELEASE_GUARD_TAG_EXISTS', 'true');
               core.info(`Tag ${version} already exists.`);
             } catch (error) {
               if (error.status === 404) {
-                core.setOutput('exists', 'false');
-                core.exportVariable('TAG_EXISTS', 'false');
+                core.exportVariable('RELEASE_GUARD_TAG_EXISTS', 'false');
                 core.info(`Tag ${version} is available.`);
               } else {
                 throw error;
@@ -67,14 +70,14 @@ jobs:
             }
 
       - name: Warn and close pull request
-        if: ${{ steps.release_info.outputs.is_release_target == 'true' && env.TAG_EXISTS == 'true' }}
+        if: ${{ env.RELEASE_GUARD_SHOULD_RUN == 'true' && env.RELEASE_GUARD_TAG_EXISTS == 'true' }}
         uses: actions/github-script@v7
         with:
           script: |
-            const version = '${{ steps.release_info.outputs.version }}';
+            const version = process.env.RELEASE_GUARD_VERSION;
+            const prNumber = Number(process.env.RELEASE_GUARD_PR_NUMBER);
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const prNumber = context.payload.pull_request.number;
             const warningMessage = `Release tag \`${version}\` already exists on this repository. This pull request is being closed to prevent changes to a locked release.`;
 
             const comments = await github.paginate(github.rest.issues.listComments, {
@@ -104,8 +107,8 @@ jobs:
             core.info(`Pull request #${prNumber} closed because tag ${version} already exists.`);
 
       - name: Fail job when release is locked
-        if: ${{ steps.release_info.outputs.is_release_target == 'true' && env.TAG_EXISTS == 'true' }}
+        if: ${{ env.RELEASE_GUARD_SHOULD_RUN == 'true' && env.RELEASE_GUARD_TAG_EXISTS == 'true' }}
         shell: bash
         run: |
-          echo "Tag ${{ steps.release_info.outputs.version }} already exists; release branch is locked." >&2
+          echo "Tag ${RELEASE_GUARD_VERSION} already exists; release branch is locked." >&2
           exit 1

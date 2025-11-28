@@ -7,9 +7,9 @@ release:
   head_branch: dev/v0.4.11
   version: v0.4.11
 pull_request:
-  number: 31
-  title: 'chore: update changes number to 12'
+  number: 32
+  title: 'chore: update condition to trigger repo info sync only on base branch'
   author: IEatCodeDaily
-  url: https://github.com/IEatCodeDaily/workflow-test/pull/31
+  url: https://github.com/IEatCodeDaily/workflow-test/pull/32
 metadata:
-  generated_at: 2025-11-28T03:49:14Z
+  generated_at: 2025-11-28T04:01:13Z

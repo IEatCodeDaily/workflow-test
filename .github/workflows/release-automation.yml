@@ -1,0 +1,128 @@
+name: Release Automation
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - box-v4.0-canary
+
+jobs:
+  auto-release:
+    # Only run if the PR was merged and came from a release/* branch
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Extract version from release branch
+        id: extract_version
+        run: |
+          RELEASE_BRANCH="${{ github.event.pull_request.head.ref }}"
+          # Extract version from release/v0.4.0 format and validate
+          if [[ ! "$RELEASE_BRANCH" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Release branch '$RELEASE_BRANCH' does not match expected format 'release/vX.Y.Z'"
+            exit 1
+          fi
+          VERSION=$(echo "$RELEASE_BRANCH" | sed 's/release\///')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+      
+      - name: Fetch latest changes
+        run: |
+          git fetch origin box-v4.0-canary
+          git fetch origin main
+      
+      - name: Merge canary to main
+        run: |
+          git checkout main
+          git reset --hard origin/main
+          git merge origin/box-v4.0-canary --no-ff -m "Merge canary to main for release ${{ steps.extract_version.outputs.version }}"
+      
+      - name: Create and push tag
+        run: |
+          VERSION="${{ steps.extract_version.outputs.version }}"
+          # Create tag, handling case where it already exists
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Warning: Tag $VERSION already exists, skipping tag creation"
+          else
+            git tag -a "$VERSION" -m "Release $VERSION"
+            echo "Created tag $VERSION"
+          fi
+          git push origin main
+          git push origin "$VERSION" || echo "Tag $VERSION already exists on remote"
+      
+      - name: Lock release branch
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const releaseBranch = '${{ github.event.pull_request.head.ref }}';
+            
+            try {
+              // Update branch protection to lock the release branch
+              await github.rest.repos.updateBranchProtection({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: releaseBranch,
+                required_status_checks: null,
+                enforce_admins: true,
+                required_pull_request_reviews: null,
+                restrictions: {
+                  users: [],
+                  teams: [],
+                  apps: []
+                },
+                required_linear_history: false,
+                allow_force_pushes: false,
+                allow_deletions: false,
+                block_creations: false,
+                required_conversation_resolution: false,
+                lock_branch: true
+              });
+              console.log(`Successfully locked branch: ${releaseBranch}`);
+            } catch (error) {
+              // If branch protection fails, log but don't fail the workflow
+              console.log(`Note: Could not lock branch ${releaseBranch}: ${error.message}`);
+              console.log('This may require admin permissions or the branch may already be protected.');
+            }
+      
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          RELEASE_VERSION: ${{ steps.extract_version.outputs.version }}
+        with:
+          script: |
+            const version = process.env.RELEASE_VERSION;
+            const prBody = process.env.PR_BODY || 'No description provided';
+            const prNumber = process.env.PR_NUMBER;
+            const prHeadRef = process.env.PR_HEAD_REF;
+            
+            try {
+              await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: version,
+                name: `Release ${version}`,
+                body: `## Changes\n\n${prBody}\n\n**PR:** #${prNumber}\n**Branch:** ${prHeadRef}`,
+                draft: false,
+                prerelease: false
+              });
+              console.log(`Successfully created release for ${version}`);
+            } catch (error) {
+              console.log(`Error creating release: ${error.message}`);
+            }

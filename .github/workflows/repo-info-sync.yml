@@ -8,7 +8,7 @@ on:
 
 jobs:
   update-repo-info:
-    if: startsWith(github.event.pull_request.base.ref, 'release/') || startsWith(github.event.pull_request.head.ref, 'release/')
+    if: startsWith(github.event.pull_request.base.ref, 'release/')
     runs-on: ubuntu-latest
     permissions:
       contents: write

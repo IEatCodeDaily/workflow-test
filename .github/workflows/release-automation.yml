@@ -2,11 +2,85 @@ name: Release Automation
 
 on:
   pull_request:
-    types: [closed]
+    types: [opened, reopened, synchronize, ready_for_review, closed]
     branches:
       - box-v4.0-canary
 
 jobs:
+  validate-release-tag:
+    if: startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Ensure release tag is available
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const core = require('@actions/core');
+
+            const releaseBranch = context.payload.pull_request.head.ref;
+            const action = context.payload.action;
+
+            if (action === 'closed' && context.payload.pull_request.merged) {
+              console.log('Pull request already merged; skipping pre-merge tag validation.');
+              return;
+            }
+
+            const versionMatch = releaseBranch.match(/^release\/(v[0-9]+\.[0-9]+\.[0-9]+)$/);
+            if (!versionMatch) {
+              console.log(`Branch ${releaseBranch} does not match release version pattern; skipping.`);
+              return;
+            }
+
+            const version = versionMatch[1];
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request.number;
+            const warningMessage = `Release tag \`${version}\` already exists on this repository. Please bump the release version before continuing.`;
+
+            let tagExists = false;
+            try {
+              await github.rest.git.getRef({
+                owner,
+                repo,
+                ref: `tags/${version}`
+              });
+              tagExists = true;
+            } catch (error) {
+              if (error.status === 404) {
+                console.log(`Tag ${version} is available.`);
+                return;
+              }
+              throw error;
+            }
+
+            if (!tagExists) {
+              console.log(`Tag ${version} is available.`);
+              return;
+            }
+
+            const existingComments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber
+            });
+
+            const warningAlreadyPosted = existingComments.some(comment => comment.body === warningMessage);
+
+            if (!warningAlreadyPosted) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: warningMessage
+              });
+            }
+
+            core.setFailed(`Tag ${version} already exists; please update the release version.`);
+
   auto-release:
     # Only run if the PR was merged and came from a release/* branch
     if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
@@ -39,19 +113,52 @@ jobs:
           VERSION=$(echo "$RELEASE_BRANCH" | sed 's/release\///')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: $VERSION"
+
+      - name: Check for existing release tag
+        id: tag_check
+        run: |
+          VERSION="${{ steps.extract_version.outputs.version }}"
+          if git ls-remote --tags origin "$VERSION" | grep -q "$VERSION"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag $VERSION already exists on origin"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag $VERSION does not exist yet"
+          fi
+
+      - name: Reject release when tag exists
+        if: steps.tag_check.outputs.exists == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ steps.extract_version.outputs.version }}';
+            const prNumber = context.payload.pull_request.number;
+            const warningMessage = `Release tag \`${version}\` already exists on this repository. Please bump the release version before continuing.`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: warningMessage
+            });
+
+            core.setFailed(`Tag ${version} already exists; release has been halted.`);
       
       - name: Fetch latest changes
+        if: steps.tag_check.outputs.exists != 'true'
         run: |
           git fetch origin box-v4.0-canary
           git fetch origin main
       
       - name: Merge canary to main
+        if: steps.tag_check.outputs.exists != 'true'
         run: |
           git checkout main
           git reset --hard origin/main
           git merge origin/box-v4.0-canary --no-ff -m "Merge canary to main for release ${{ steps.extract_version.outputs.version }}"
       
       - name: Create and push tag
+        if: steps.tag_check.outputs.exists != 'true'
         run: |
           VERSION="${{ steps.extract_version.outputs.version }}"
           # Create tag, handling case where it already exists
@@ -65,6 +172,7 @@ jobs:
           git push origin "$VERSION" || echo "Tag $VERSION already exists on remote"
       
       - name: Lock release branch
+        if: steps.tag_check.outputs.exists != 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -99,6 +207,7 @@ jobs:
             }
       
       - name: Create GitHub Release
+        if: steps.tag_check.outputs.exists != 'true'
         uses: actions/github-script@v7
         env:
           PR_BODY: ${{ github.event.pull_request.body }}

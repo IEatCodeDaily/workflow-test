@@ -2,7 +2,7 @@ name: Repo Info Sync
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review, edited]
+    types: [opened]
     branches:
       - 'release/**'
 

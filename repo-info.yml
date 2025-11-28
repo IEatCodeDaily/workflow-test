@@ -3,13 +3,13 @@ repository:
   name: workflow-test
   default_branch: main
 release:
-  base_branch: release/v0.4.11
-  head_branch: dev/v0.4.11
-  version: v0.4.11
+  base_branch: release/v0.4.12
+  head_branch: dev/v0.4.12
+  version: v0.4.12
 pull_request:
-  number: 32
-  title: 'chore: update condition to trigger repo info sync only on base branch'
+  number: 35
+  title: 'chore: update changes number to 14'
   author: IEatCodeDaily
-  url: https://github.com/IEatCodeDaily/workflow-test/pull/32
+  url: https://github.com/IEatCodeDaily/workflow-test/pull/35
 metadata:
-  generated_at: 2025-11-28T04:01:13Z
+  generated_at: 2025-11-28T04:21:07Z

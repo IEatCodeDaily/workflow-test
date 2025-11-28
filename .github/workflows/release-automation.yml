@@ -5,10 +5,11 @@ on:
     types: [opened, reopened, synchronize, ready_for_review, closed]
     branches:
       - box-v4.0-canary
+      - 'release/**'
 
 jobs:
   validate-release-tag:
-    if: startsWith(github.event.pull_request.head.ref, 'release/')
+    if: startsWith(github.event.pull_request.base.ref, 'release/')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,19 +20,17 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const core = require('@actions/core');
-
-            const releaseBranch = context.payload.pull_request.head.ref;
+            const targetBranch = context.payload.pull_request.base.ref;
             const action = context.payload.action;
 
-            if (action === 'closed' && context.payload.pull_request.merged) {
-              console.log('Pull request already merged; skipping pre-merge tag validation.');
+            if (action === 'closed') {
+              console.log('Pull request is already closed; skipping tag validation.');
               return;
             }
 
-            const versionMatch = releaseBranch.match(/^release\/(v[0-9]+\.[0-9]+\.[0-9]+)$/);
+            const versionMatch = targetBranch.match(/^release\/(v[0-9]+\.[0-9]+\.[0-9]+)$/);
             if (!versionMatch) {
-              console.log(`Branch ${releaseBranch} does not match release version pattern; skipping.`);
+              console.log(`Target branch ${targetBranch} does not match release version pattern; skipping.`);
               return;
             }
 
@@ -39,7 +38,7 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const prNumber = context.payload.pull_request.number;
-            const warningMessage = `Release tag \`${version}\` already exists on this repository. Please bump the release version before continuing.`;
+            const warningMessage = `Release tag \`${version}\` already exists on this repository. This pull request is being closed to prevent changes to a locked release.`;
 
             let tagExists = false;
             try {
@@ -79,7 +78,17 @@ jobs:
               });
             }
 
-            core.setFailed(`Tag ${version} already exists; please update the release version.`);
+            if (context.payload.pull_request.state !== 'closed') {
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: prNumber,
+                state: 'closed'
+              });
+              console.log(`Pull request #${prNumber} closed because tag ${version} already exists.`);
+            }
+
+            core.setFailed(`Tag ${version} already exists; the release branch is locked.`);
 
   auto-release:
     # Only run if the PR was merged and came from a release/* branch

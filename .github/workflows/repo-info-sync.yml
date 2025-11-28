@@ -2,13 +2,13 @@ name: Repo Info Sync
 
 on:
   pull_request:
-    types: [closed]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
     branches:
       - 'release/**'
 
 jobs:
   update-repo-info:
-    if: github.event.pull_request.merged == true
+    if: startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -19,7 +19,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Generate repo info file
         id: write_repo_info

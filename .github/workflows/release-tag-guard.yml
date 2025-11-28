@@ -1,9 +1,10 @@
 name: Release Tag Guard
 
 on:
-  workflow_run:
-    workflows: ['Repo Info Sync']
-    types: [completed]
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+    branches:
+      - 'release/**'
 
 jobs:
   release-branch-lock:
@@ -18,43 +19,33 @@ jobs:
       RELEASE_GUARD_TAG_EXISTS: 'false'
 
     steps:
-      - name: Extract release pull request context
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const run = context.payload.workflow_run;
+      - name: Gather release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "RELEASE_GUARD_SHOULD_RUN=false" >> "$GITHUB_ENV"
+          echo "RELEASE_GUARD_VERSION=" >> "$GITHUB_ENV"
+          echo "RELEASE_GUARD_PR_NUMBER=" >> "$GITHUB_ENV"
+          echo "RELEASE_GUARD_TAG_EXISTS=false" >> "$GITHUB_ENV"
 
-            if (!run) {
-              core.info('No workflow run payload found; skipping.');
-              return;
-            }
+          PR_STATE="${{ github.event.pull_request.state }}"
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
 
-            if (run.conclusion !== 'success') {
-              core.info(`Upstream workflow concluded with status ${run.conclusion}; skipping guard.`);
-              return;
-            }
+          if [[ "$PR_STATE" == "closed" ]]; then
+            echo "Pull request already closed; skipping validation." >&2
+            exit 0
+          fi
 
-            const pr = run.pull_requests && run.pull_requests[0];
-            if (!pr) {
-              core.info('Workflow run is not associated with a pull request; skipping.');
-              return;
-            }
-
-            if (pr.state === 'closed') {
-              core.info('Pull request already closed; skipping guard.');
-              return;
-            }
-
-            const baseRef = pr.base.ref;
-            const match = baseRef.match(/^release\/(v[0-9]+\.[0-9]+\.[0-9]+)$/);
-            if (!match) {
-              core.info(`Base branch ${baseRef} is not a release branch; skipping guard.`);
-              return;
-            }
-
-            core.exportVariable('RELEASE_GUARD_SHOULD_RUN', 'true');
-            core.exportVariable('RELEASE_GUARD_VERSION', match[1]);
-            core.exportVariable('RELEASE_GUARD_PR_NUMBER', String(pr.number));
+          if [[ "$BASE_BRANCH" =~ ^release/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+            echo "RELEASE_GUARD_SHOULD_RUN=true" >> "$GITHUB_ENV"
+            echo "RELEASE_GUARD_VERSION=$VERSION" >> "$GITHUB_ENV"
+            echo "RELEASE_GUARD_PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+            echo "Detected release target branch $BASE_BRANCH with version $VERSION."
+          else
+            echo "Base branch $BASE_BRANCH does not match release pattern; skipping validation." >&2
+          fi
 
       - name: Check if release tag exists
         if: ${{ env.RELEASE_GUARD_SHOULD_RUN == 'true' }}

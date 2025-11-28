@@ -2,13 +2,13 @@ name: Repo Info Sync
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review, edited]
+    types: [closed]
     branches:
       - 'release/**'
 
 jobs:
   update-repo-info:
-    if: startsWith(github.event.pull_request.base.ref, 'release/')
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -19,6 +19,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.event.pull_request.base.ref }}
 
       - name: Generate repo info file
         id: write_repo_info
@@ -48,6 +49,18 @@ jobs:
 
           TITLE_ESCAPED="${PR_TITLE//\'/\'\'}"
 
+          CURRENT_VERSION=""
+          if [[ -f repo-info.yml ]]; then
+            CURRENT_VERSION=$(awk 'BEGIN{found=0} /^release:/{found=1; next} found && /^  version:/ {print $2; exit}' repo-info.yml)
+          fi
+
+          if [[ "$CURRENT_VERSION" == "$VERSION" && "$VERSION" != "unknown" ]]; then
+            echo "Existing repo-info.yml already reports version $VERSION; skipping update."
+            echo "needs_commit=false" >> "$GITHUB_OUTPUT"
+            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           {
@@ -68,10 +81,11 @@ jobs:
             printf "  generated_at: %s\n" "$GENERATED_AT"
           } > repo-info.yml
 
-          if git diff --quiet -- repo-info.yml 2>/dev/null; then
-            echo "needs_commit=false" >> "$GITHUB_OUTPUT"
-          else
+          STATUS="$(git status --short -- repo-info.yml 2>/dev/null || true)"
+          if [[ -n "$STATUS" ]]; then
             echo "needs_commit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_commit=false" >> "$GITHUB_OUTPUT"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 

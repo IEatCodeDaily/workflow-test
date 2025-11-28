@@ -109,16 +109,54 @@ jobs:
           script: |
             const version = process.env.RELEASE_VERSION;
             const prBody = process.env.PR_BODY || 'No description provided';
-            const prNumber = process.env.PR_NUMBER;
+            const prNumber = Number(process.env.PR_NUMBER);
             const prHeadRef = process.env.PR_HEAD_REF;
-            
+
+            const buildCommitSummary = async () => {
+              try {
+                const commits = await github.paginate(github.rest.pulls.listCommits, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber
+                });
+
+                if (!commits.length) {
+                  return '_No commits found_';
+                }
+
+                return commits
+                  .map(commit => {
+                    const message = commit.commit?.message?.split('\n')[0] || 'No commit message';
+                    const sha = commit.sha?.substring(0, 7) || 'unknown';
+                    const author = commit.author?.login || commit.commit?.author?.name || 'unknown';
+                    return `- ${message} (${sha} by ${author})`;
+                  })
+                  .join('\n');
+              } catch (error) {
+                console.log(`Warning: Failed to retrieve commits for PR #${prNumber}: ${error.message}`);
+                return '_Unable to retrieve commits_';
+              }
+            };
+
+            const commitSummary = await buildCommitSummary();
+            const releaseBody = [
+              '## Pull Request Summary',
+              prBody,
+              '',
+              '## Commits',
+              commitSummary,
+              '',
+              `**PR:** #${prNumber}`,
+              `**Branch:** ${prHeadRef}`
+            ].join('\n');
+
             try {
               await github.rest.repos.createRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 tag_name: version,
                 name: `Release ${version}`,
-                body: `## Changes\n\n${prBody}\n\n**PR:** #${prNumber}\n**Branch:** ${prHeadRef}`,
+                body: releaseBody,
                 draft: false,
                 prerelease: false
               });

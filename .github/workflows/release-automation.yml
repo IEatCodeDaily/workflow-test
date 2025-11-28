@@ -91,8 +91,8 @@ jobs:
             core.setFailed(`Tag ${version} already exists; the release branch is locked.`);
 
   auto-release:
-    # Only run if the PR was merged and came from a release/* branch
-    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    # Only run if the PR was merged and came from a release/* branch and destiantion have "canary" in the name
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/') && contains(github.event.pull_request.base.ref, 'canary')
     runs-on: ubuntu-latest
     permissions:
       contents: write

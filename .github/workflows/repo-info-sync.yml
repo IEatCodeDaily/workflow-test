@@ -63,9 +63,6 @@ jobs:
             printf "  base_branch: %s\n" "$DEFAULT_BRANCH"
             printf "  head_branch: %s\n" "${BRANCH_REF#refs/heads/}"
             printf "  version: %s\n" "$VERSION"
-            printf "metadata:\n"
-            printf "  generated_at: %s\n" "$GENERATED_AT"
-            printf "  commit: %s\n" "$COMMIT_SHA"
           } > repo-info.yml
 
           STATUS="$(git status --short -- repo-info.yml 2>/dev/null || true)"

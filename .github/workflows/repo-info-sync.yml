@@ -1,0 +1,90 @@
+name: Repo Info Sync
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+    branches:
+      - 'release/**'
+
+jobs:
+  update-repo-info:
+    if: startsWith(github.event.pull_request.base.ref, 'release/') || startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate repo info file
+        id: write_repo_info
+        shell: bash
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          VERSION="unknown"
+          for ref in "$PR_BASE" "$PR_HEAD"; do
+            if [[ "$ref" =~ ^release/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              VERSION="${BASH_REMATCH[1]}"
+              break
+            fi
+          done
+
+          if [[ -z "${DEFAULT_BRANCH}" ]]; then
+            DEFAULT_BRANCH="main"
+          fi
+
+          TITLE_ESCAPED="${PR_TITLE//\'/\'\'}"
+
+          GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          {
+            printf "repository:\n"
+            printf "  owner: %s\n" "$OWNER"
+            printf "  name: %s\n" "$REPO_NAME"
+            printf "  default_branch: %s\n" "$DEFAULT_BRANCH"
+            printf "release:\n"
+            printf "  base_branch: %s\n" "$PR_BASE"
+            printf "  head_branch: %s\n" "$PR_HEAD"
+            printf "  version: %s\n" "$VERSION"
+            printf "pull_request:\n"
+            printf "  number: %s\n" "$PR_NUMBER"
+            printf "  title: '%s'\n" "$TITLE_ESCAPED"
+            printf "  author: %s\n" "$PR_AUTHOR"
+            printf "  url: %s/%s/%s/pull/%s\n" "$GITHUB_SERVER_URL" "$OWNER" "$REPO_NAME" "$PR_NUMBER"
+            printf "metadata:\n"
+            printf "  generated_at: %s\n" "$GENERATED_AT"
+          } > repo-info.yml
+
+          if git diff --quiet -- repo-info.yml 2>/dev/null; then
+            echo "needs_commit=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_commit=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit repo info update
+        if: ${{ steps.write_repo_info.outputs.needs_commit == 'true' && github.event.pull_request.head.repo.fork == false }}
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: sync repo info for ${{ steps.write_repo_info.outputs.version }}"
+          file_pattern: repo-info.yml
+
+      - name: Fail when update is required but cannot push
+        if: ${{ steps.write_repo_info.outputs.needs_commit == 'true' && github.event.pull_request.head.repo.fork == true }}
+        shell: bash
+        run: |
+          echo "repo-info.yml is out of date but this workflow cannot push to forked repositories. Please update the file manually." >&2
+          exit 1

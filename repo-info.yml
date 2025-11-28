@@ -1,0 +1,15 @@
+repository:
+  owner: IEatCodeDaily
+  name: workflow-test
+  default_branch: main
+release:
+  base_branch: release/v0.4.11
+  head_branch: dev/v0.4.11
+  version: v0.4.11
+pull_request:
+  number: 31
+  title: 'chore: update changes number to 12'
+  author: IEatCodeDaily
+  url: https://github.com/IEatCodeDaily/workflow-test/pull/31
+metadata:
+  generated_at: 2025-11-28T03:49:14Z
